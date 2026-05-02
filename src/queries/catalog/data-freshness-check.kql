@@ -1,0 +1,78 @@
+// Data Freshness Check
+// Checks data currency across all FinOps hub functions (Costs, Prices, Recommendations, Transactions).
+// Reports the latest data date, ingestion time, staleness, and row count for each function.
+// Use this query as a pre-flight check before running analytics queries to ensure data is current.
+//
+// The Hub database exposes stored functions (not tables). Each function reads from
+// Ingestion database final tables via cross-database union (v1_0 + v1_2).
+// The date columns differ per function — this query uses the correct field for each:
+//   - Costs:           ChargePeriodStart (charge period), x_IngestionTime (pipeline run)
+//   - Prices:          x_EffectivePeriodStart (pricing period), x_IngestionTime
+//   - Recommendations: x_RecommendationDate (recommendation date), x_IngestionTime
+//   - Transactions:    ChargePeriodStart (charge period), x_IngestionTime
+//
+// WARNING: Do NOT use ingestion_time() on stored functions — it returns extent creation
+// time from the underlying table, not actual data currency. Use x_IngestionTime instead.
+//
+// Parameters: none
+// Author: FinOps Toolkit Team
+// Last Tested: 2026-05-02
+//
+union
+  (Costs()
+   | summarize
+       LatestDataDate = max(ChargePeriodStart),
+       LatestIngestion = max(x_IngestionTime),
+       RowCount = count()
+   | project
+       Function = "Costs",
+       DateColumn = "ChargePeriodStart",
+       LatestDataDate,
+       LatestIngestion,
+       DataStalenessHours = datetime_diff('hour', now(), LatestDataDate),
+       IngestionLagHours = datetime_diff('hour', now(), LatestIngestion),
+       RowCount,
+       HasData = RowCount > 0),
+  (Prices()
+   | summarize
+       LatestDataDate = max(x_EffectivePeriodStart),
+       LatestIngestion = max(x_IngestionTime),
+       RowCount = count()
+   | project
+       Function = "Prices",
+       DateColumn = "x_EffectivePeriodStart",
+       LatestDataDate,
+       LatestIngestion,
+       DataStalenessHours = datetime_diff('hour', now(), LatestDataDate),
+       IngestionLagHours = datetime_diff('hour', now(), LatestIngestion),
+       RowCount,
+       HasData = RowCount > 0),
+  (Recommendations()
+   | summarize
+       LatestDataDate = max(x_RecommendationDate),
+       LatestIngestion = max(x_IngestionTime),
+       RowCount = count()
+   | project
+       Function = "Recommendations",
+       DateColumn = "x_RecommendationDate",
+       LatestDataDate,
+       LatestIngestion,
+       DataStalenessHours = datetime_diff('hour', now(), LatestDataDate),
+       IngestionLagHours = datetime_diff('hour', now(), LatestIngestion),
+       RowCount,
+       HasData = RowCount > 0),
+  (Transactions()
+   | summarize
+       LatestDataDate = max(ChargePeriodStart),
+       LatestIngestion = max(x_IngestionTime),
+       RowCount = count()
+   | project
+       Function = "Transactions",
+       DateColumn = "ChargePeriodStart",
+       LatestDataDate,
+       LatestIngestion,
+       DataStalenessHours = datetime_diff('hour', now(), LatestDataDate),
+       IngestionLagHours = datetime_diff('hour', now(), LatestIngestion),
+       RowCount,
+       HasData = RowCount > 0)
+| order by Function asc
